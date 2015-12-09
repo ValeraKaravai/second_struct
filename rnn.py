@@ -1,39 +1,45 @@
 import numpy as np
-import random
-import math
 import theano
 import theano.tensor as T
+from Bio.PDB import *
 import os
-import datetime
-# import theano.tensor as T
-global t, a
-global mAmino
-global mProt  # matrix amino acid
+import pprint
 
 mode = theano.Mode(linker='cvm')
 
 
-# def InitialMatrix(aminoFile, proteinFile):
-#     mAmino = np.zeros(shape=(a, t))
-#     f = open(aminoFile, "r")
-#     prot = open(proteinFile, "r")
-#     str_amino = ''
-#     for i in f:
-#         mAmino[len(str_amino), ] = np.random.randn(t)
-#         str_amino += i.split()[0]
-#     mProt = np.zeros(shape=(30, t))
-
-#     count = 0
-#     for i in prot:
-#         str_prot = i
-#         for j in str_prot:
-#             mProt[count, ] = mAmino[str_amino.find(j), ]
-#             count += 1
-#     return mProt
+def Initial_mAmino(aminoFile, a, t):
+    mAmino = {}
+    f = open(aminoFile, "r")
+    for i in f:
+        i = i.split()
+        vect = np.random.randn(t)
+        mAmino.update({i[0]: vect})
+    return mAmino
 
 
-def softplus(x):
-    return math.log(1 + math.exp(x))
+def InitialMatrix(input_file, mAmino, t, max_len, count):
+    inp = open(input_file, 'r')
+    second = {'H': 0, 'B': 1, 'C': 2}
+    bool_len = False
+    for j, i in enumerate(inp):
+        if j == 0:
+            if len(i) >= max_len:
+                count -= 1
+                bool_len = True
+            mt_first = np.zeros(shape=(len(i) - 1, t))
+            i = i.split('\n')[0]
+            for l, k in enumerate(i):
+                vect = mAmino[k]
+                mt_first[l, ] = vect
+        if j == 1:
+            mt_second = []
+            for k in i:
+                if k != 'H' and k != 'B':
+                    mt_second.append(second['C'])
+                else:
+                    mt_second.append(second[k])
+    return mt_first[:max_len], mt_second[:max_len], count, bool_len
 
 
 class RecurNN (object):
@@ -112,7 +118,7 @@ class RecurNN (object):
 
         self.err = []
 
-    def mult (self, y):
+    def mult(self, y):
         return -T.mean(T.log(self.pyx)[T.arange(y.shape[0]), y])
 
     def train(self, x_train, y_train, x_test=None, y_test=None):
@@ -168,45 +174,46 @@ class RecurNN (object):
             this_train_loss = np.mean(train_losses)
             self.err.append(this_train_loss)
 
-            print iterat, this_train_loss, self.l_r
-
             self.l_r *= self.l_r_d
+            print iterat, this_train_loss, self.l_r
 
 
 def test_softplus():
-    print "Test softplus"
-
-    n_x = 2
+    print "Softplus"
+    file_dssp = os.listdir('parse_file/pdb/')
+    pp = pprint.PrettyPrinter()
+    aminoFile = "data/amino_acid.txt"
+    second_list = []
+    amino_list = []
+    t = 11
+    a = 20
+    n_x = t
     n_h = 6
     n_y = 3
-    time_steps = 10
-    n_seq = 100
-
-    np.random.seed(0)
-
-    seq = np.random.randn(n_seq, time_steps, n_x)
-
-    tar = np.zeros((n_seq, time_steps), dtype=np.int)
-
-    th = 0.5
-
-    tar[:, 2:][seq[:, 1:-1, 1] > seq[:, :-2, 0] + th] = 1
-    tar[:, 2:][seq[:, 1:-1, 1] < seq[:, :-2, 0] + th] = 2
-
+    max_len = 90
+    n_seq = 30
+    count = n_seq
+    mAmino = Initial_mAmino(aminoFile, a, t)
+    temp = 0
+    while count:
+        input_file = 'parse_file/pdb/' + file_dssp[temp]
+        temp += 1
+        print input_file
+        mt_first, mt_second, count, bool_len = InitialMatrix(input_file,
+                                                             mAmino, t,
+                                                             max_len, count)
+        if bool_len:
+            amino_list.append(mt_first)
+            second_list.append(mt_second)
     model = RecurNN(n_x=n_x, n_h=n_h, n_y=n_y,
                     activ='softplus', output='softmax', l_r=0.001,
                     l_r_d=0.999, L1_reg=0, L2_reg=0, init_mom=0.5,
-                    final_mom=0.9, mom_switch=5, n_iter=100)
-    model.train(seq, tar)
-
-    guess = model.predict_pr(seq[1])
-
-
-# aminoFile = "amino_acid.txt"
-# proteinFile = "protein_2.txt"
-# t = 1024
-# a = 20
-# mProt = InitialMatrix(aminoFile, proteinFile)
+                    final_mom=0.9, mom_switch=5, n_iter=500)
+    model.train(amino_list, second_list)
+    guess = model.predict(amino_list[0])
+    pp.pprint(guess)
+    print(second_list[0])
 
 if __name__ == "__main__":
+    aminoFile = "data/amino_acid.txt"
     test_softplus()
